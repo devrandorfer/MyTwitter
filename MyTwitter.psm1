@@ -40,7 +40,7 @@ function Get-OAuthAuthorization {
 	[OutputType('System.Management.Automation.PSCustomObject')]
 	param (
 		[Parameter(Mandatory)]
-		[ValidateSet('Timeline','DirectMessage','Update')]
+		[ValidateSet('Timeline','DirectMessage','Update', 'Search')]
 		[string]$Api,
 		[Parameter(Mandatory)]
 		[string]$HttpEndPoint,
@@ -102,7 +102,8 @@ function Get-OAuthAuthorization {
 			## Create a string called $SignatureBase that joins all URL encoded 'Key=Value' elements with a &
 			## Remove the URL encoded & at the end and prepend the necessary 'POST&' verb to the front
 			$SignatureParams.GetEnumerator() | sort Name | foreach { $SignatureBase += [System.Uri]::EscapeDataString("$($_.Key)=$($_.Value)&") }
-			$SignatureBase = $SignatureBase.TrimEnd('%26')
+            if($SignatureBase -like '*%26') { $SignatureBase = $SignatureBase.Substring(0,$SignatureBase.length - 3) }
+			#$SignatureBase = $SignatureBase.TrimEnd('%26')
 			$SignatureBase = "$HttpVerb&" + $SignatureBase
 			Write-Verbose "Base signature generated '$SignatureBase'"
 			
@@ -741,6 +742,61 @@ Function Get-TweetTimeline {
 	}
 }
 
+Function Get-TweetSearchResult {
+<#
+  .SYNOPSIS
+   This Function retrieves the result of a twitter tweet search.
+  .DESCRIPTION
+   This Function retrieves the result of a twitter tweet search.
+  .EXAMPLE
+   $TimeLine = Get-TweetTimeline -UserName "sstranger" -MaximumTweets 10
+   $TimeLine | Out-Gridview -PassThru
+   
+   This example stores the retrieved Twitter timeline for user sstranger with a maximum of 10 tweets and pipes the result
+   to the Out-GridView cmdlet.
+   .EXAMPLE
+   $TimeLine = Get-TweetTimeline -UserName "sstranger" -MaximumTweets 100
+   $TimeLine | Sort-Object -Descending | Out-Gridview -PassThru
+   
+   This example stores the retrieved Twitter timeline for user sstranger with a maximum of 100 tweets,
+   sorts the result descending on retweet counts and pipes the result to the Out-GridView cmdlet.
+#>
+	[CmdletBinding()]
+	[OutputType('System.Management.Automation.PSCustomObject')]
+	param (
+		[Parameter(Mandatory)]
+		[string]$query,
+        [ValidateRange(1, 100)]
+		[int]$MaximumTweets = 100,
+        [Parameter()]
+		[switch]$IncludeRetweets = $true,
+		[Parameter()]
+		[switch]$IncludeReplies = $true,
+        [Parameter()]
+		[hashtable]$AdditionalApiParams
+	)
+	process {
+		$HttpEndPoint = "https://api.twitter.com/1.1/search/tweets.json"
+		$ApiParams = @{
+			'q' = [System.Web.HttpUtility]::UrlEncode($query)
+            'count' = $MaximumTweets
+            'include_rts' = @{ $true = 'true';$false = 'false' }[$IncludeRetweets -eq $true]
+			'exclude_replies' = @{ $true = 'false'; $false = 'true' }[$IncludeReplies -eq $true]
+		}
+        if($AdditionalApiParams)
+        {
+            $AdditionalApiParams.GetEnumerator() | sort name | foreach { $ApiParams.Add($_.Key, $_.Value) | Out-Null }
+        }
+		$AuthorizationString = Get-OAuthAuthorization -Api 'Search' -ApiParameters $ApiParams -HttpEndPoint $HttpEndPoint -HttpVerb GET
+		
+		$HttpRequestUrl = "$($HttpEndPoint)?"
+		$ApiParams.GetEnumerator() | sort name | foreach { $HttpRequestUrl += "{0}={1}&" -f $_.Key, $_.Value }
+		$HttpRequestUrl = $HttpRequestUrl.Trim('&')
+		Write-Verbose "HTTP request URL is '$HttpRequestUrl'"
+		Invoke-RestMethod -URI $HttpRequestUrl -Method Get -Headers @{ 'Authorization' = $AuthorizationString } -ContentType "application/json"
+    
+	}
+}
 <#
 .Synopsis
    Short description
@@ -849,4 +905,5 @@ Export-ModuleMember -Function @( 'Get-OAuthAuthorization',
     'Get-ShortURL',
     'Resize-Tweet',
     'Get-TweetTimeline',
+    'Get-TweetSearchResult',
     'Set-BitlyAccessToken')
